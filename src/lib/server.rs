@@ -119,11 +119,9 @@ impl Server {
                 }
                 else {
                     client.writeln(ServerMessage::CommandNotRecognised);
-                    client.disconnect();
                 }
             }
             ClientMessage::Quit => {
-                client.writeln(ServerMessage::Okay(None));
                 client.disconnect();
             }
         }

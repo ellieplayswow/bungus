@@ -17,6 +17,7 @@ pub(crate) enum ServerMessage {
     BeginData,
 
     CommandNotRecognised,
+    ClosingConnection,
 
     Custom(String),
 }
@@ -67,6 +68,7 @@ impl Display for ServerMessage {
             ServerMessage::BeginData => f.write_str("354 Start mail input; end with <CRLF>.<CRLF>"),
             ServerMessage::CommandNotRecognised => f.write_str("500 command not recognised"),
             ServerMessage::Custom(data) => f.write_str(data),
+            ServerMessage::ClosingConnection => f.write_str("221 goodbyungus :(")
         }
     }
 }

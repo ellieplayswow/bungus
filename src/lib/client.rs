@@ -2,6 +2,7 @@ use std::fmt::Display;
 use std::io::{BufRead, BufReader, Lines, Write};
 use std::net::{Shutdown, SocketAddr, TcpStream};
 use crate::lib::mail::{MailTransport, Mailbox};
+use crate::lib::message::ServerMessage;
 
 pub struct Client {
     pub(crate) stream: TcpStream,
@@ -41,7 +42,8 @@ impl Client {
         }
     }
 
-    pub fn disconnect(&self) {
+    pub fn disconnect(&mut self) {
+        self.writeln(ServerMessage::ClosingConnection);
         self.stream.shutdown(Shutdown::Both).unwrap();
     }
 
