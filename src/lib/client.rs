@@ -1,44 +1,16 @@
-use std::collections::HashMap;
-use std::error::Error;
 use std::fmt::Display;
 use std::io::{BufRead, BufReader, Lines, Write};
-use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
+use std::net::{Shutdown, SocketAddr, TcpStream};
+use crate::lib::mail::{MailTransport, Mailbox};
 
 pub struct Client {
-    stream: TcpStream,
+    pub(crate) stream: TcpStream,
     pub(crate) host: Option<String>,
 
     pub address: SocketAddr,
     pub introduced: bool,
-}
-
-pub struct ClientPool {
-    clients: HashMap<SocketAddr, Client>
-}
-
-pub enum ClientPoolError {
-    CantResolvePeer
-}
-
-impl ClientPool {
-    pub fn new() -> Self {
-        ClientPool {
-            clients: HashMap::new()
-        }
-    }
-
-    pub fn get_or_create_client(&mut self, stream: TcpStream) -> Result<&mut Client, ClientPoolError> {
-        if let Ok(address) = stream.peer_addr() {
-            return Ok(&mut *self.clients.entry(address).or_insert(Client {
-                stream,
-                host: None,
-
-                address,
-                introduced: false,
-            }));
-        }
-        Err(ClientPoolError::CantResolvePeer)
-    }
+    pub mail_transport: Option<MailTransport>,
+    pub in_data_section: bool
 }
 
 impl Client {
@@ -46,6 +18,27 @@ impl Client {
         let reader = BufReader::new(self.stream.try_clone().unwrap());
 
         reader.lines()
+    }
+
+    pub fn start_mail(&mut self, from: Mailbox) {
+        let mut mail_transport = MailTransport::new();
+        mail_transport.from(from);
+        self.mail_transport = Some(mail_transport);
+    }
+
+    pub fn add_recipient(&mut self, to: Mailbox) {
+        if let Some(ref mut mail_transport) = self.mail_transport {
+            mail_transport.to(to);
+        }
+    }
+
+    pub fn append_data(&mut self, data: &[u8]) {
+        if let Some(ref mut mail_transport) = self.mail_transport {
+            let mut data = data.to_vec();
+            data.push(b'\r');
+            data.push(b'\n');
+            mail_transport.data(data.as_slice());
+        }
     }
 
     pub fn disconnect(&self) {

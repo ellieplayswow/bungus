@@ -1,13 +1,10 @@
-use std::net::{Shutdown, TcpListener};
-use std::thread;
-use crate::lib::client::{Client, ClientPool};
+use std::net::{TcpListener};
+use crate::lib::client::{Client};
 use crate::lib::message::{ClientMessage, ServerMessage};
 
 pub struct Server {
     host: String,
     port: u16,
-
-    client_pool: ClientPool,
     listener: Option<TcpListener>,
 
     on_connect: Option<Box<dyn FnMut() + Send + Sync>>,
@@ -18,8 +15,6 @@ impl Server {
         Server {
             host: String::from("127.0.0.1"),
             port: 25,
-
-            client_pool: ClientPool::new(),
             listener: None,
 
             on_connect: None,
@@ -42,10 +37,18 @@ impl Server {
         for stream in self.listener.unwrap().incoming() {
             match stream {
                 Ok(stream) => {
-                    println!("New connection: {}", stream.peer_addr().unwrap());
-                    let client = self.client_pool.get_or_create_client(stream);
+                    if let Ok(address) = stream.peer_addr() {
+                        println!("New connection: {}", address);
 
-                    if let Ok(client) = client {
+                        let mut client = Client {
+                            stream,
+                            host: None,
+
+                            address,
+                            introduced: false,
+                            mail_transport: None,
+                            in_data_section: false,
+                        };
 
                         if !client.introduced {
                             client.writeln(ServerMessage::ServiceReady);
@@ -54,7 +57,7 @@ impl Server {
 
                         for line in client.read() {
                             if let Ok(line) = line {
-                                Self::handle_message(client, ClientMessage::from(line));
+                                Self::handle_message(&mut client, ClientMessage::from(line));
                             }
                         }
                     }
@@ -67,22 +70,61 @@ impl Server {
     }
 
     fn handle_message(client: &mut Client, message: ClientMessage) {
+        // @todo - introduce client states instead of in_data_section / introduced
         match message {
             ClientMessage::Helo(hostname) => {
                 println!("client {} identifying as {}", client.address, hostname);
                 client.hostname(hostname.clone());
                 client.writeln(ServerMessage::Okay(Some(format!("haiiiii {} :3", hostname))));
             }
-            ClientMessage::Unknown(msg) => {
-                println!("{}: '{}'", client.address, msg);
-                client.writeln(ServerMessage::CommandNotRecognised);
-                client.disconnect();
-            }
             ClientMessage::StartMail(from) => {
                 if let Some(host) = &client.host {
                     println!("{}: mail from {}", host, from);
+                    client.start_mail(from);
                     client.writeln(ServerMessage::Okay(None))
                 }
+            }
+            ClientMessage::AddRecipient(to) => {
+                if let Some(host) = &client.host {
+                    println!("{}: mail to {}", host, to);
+
+                    client.add_recipient(to);
+                    client.writeln(ServerMessage::Okay(None))
+                }
+            }
+            ClientMessage::BeginData => {
+                if let Some(host) = &client.host {
+                    println!("{}: beginning data section", host);
+                    client.in_data_section = true;
+
+                    client.writeln(ServerMessage::BeginData)
+                }
+            }
+
+            ClientMessage::Unknown(msg) => {
+                println!("{}: '{}'", client.address, msg);
+                if client.in_data_section {
+                    if msg == "." {
+                        client.in_data_section = false;
+                        client.writeln(ServerMessage::Okay(None));
+
+                        if let Some(mail_transport) = &client.mail_transport {
+                            println!("{:?}", std::str::from_utf8(&mail_transport.data.as_slice()));
+                        }
+                        // @todo: send mail somewhere
+                    }
+                    else {
+                        client.append_data(msg.as_bytes());
+                    }
+                }
+                else {
+                    client.writeln(ServerMessage::CommandNotRecognised);
+                    client.disconnect();
+                }
+            }
+            ClientMessage::Quit => {
+                client.writeln(ServerMessage::Okay(None));
+                client.disconnect();
             }
         }
     }
